@@ -44,7 +44,26 @@ export type {
 export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
 
 /**
- * The ambient parent environment minus credential-shaped names and minus all
+ * Credential-shaped names exempted from {@link SENSITIVE_ENV_PATTERN}. The
+ * developer CLIs a tool call reaches for most often — `gh`, `npm`, `aws`,
+ * `docker` — authenticate from the ambient environment and stop at an
+ * interactive login prompt once their token is scrubbed, which reads to the
+ * model as a hung command. Compared against the upper-cased name, so the
+ * exemption matches case-insensitively like the pattern it overrides.
+ */
+export const FORWARDED_CREDENTIAL_ENV = new Set([
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'NPM_TOKEN',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'DOCKER_PASSWORD',
+])
+
+/**
+ * The ambient parent environment minus credential-shaped names outside
+ * {@link FORWARDED_CREDENTIAL_ENV}, and minus all
  * `DSH_*` names — the canonical base every harness child starts from. `PATH`,
  * `HOME`, locale, and proxy variables survive, so child CLIs run normally;
  * harness identity never leaks implicitly (a deliberately forwarded
@@ -60,7 +79,10 @@ export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
 export function scrubbedParentEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !SENSITIVE_ENV_PATTERN.test(key) && !key.toUpperCase().startsWith(DSH_ENV_PREFIX)) env[key] = value
+    if (value === undefined) continue
+    if (key.toUpperCase().startsWith(DSH_ENV_PREFIX)) continue
+    if (SENSITIVE_ENV_PATTERN.test(key) && !FORWARDED_CREDENTIAL_ENV.has(key.toUpperCase())) continue
+    env[key] = value
   }
   return env
 }

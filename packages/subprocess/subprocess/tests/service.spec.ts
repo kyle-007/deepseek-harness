@@ -97,4 +97,17 @@ describe('SubprocessRuntime seam', () => {
       delete process.env.SCRUB_PROBE_PLAIN
     }
   })
+
+  it('scrubbedParentEnv forwards the developer-CLI credentials in the exemption set', () => {
+    process.env.GITHUB_TOKEN = 'gh-probe'
+    process.env.AWS_SECRET_ACCESS_KEY = 'aws-probe'
+    try {
+      const env = scrubbedParentEnv()
+      expect(env.GITHUB_TOKEN).toBe('gh-probe')
+      expect(env.AWS_SECRET_ACCESS_KEY).toBe('aws-probe')
+    } finally {
+      delete process.env.GITHUB_TOKEN
+      delete process.env.AWS_SECRET_ACCESS_KEY
+    }
+  })
 })
