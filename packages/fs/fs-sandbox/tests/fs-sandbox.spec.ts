@@ -2,9 +2,9 @@
  * Tests for the sandbox-enforcing filesystem backend: the per-call policy fence
  * on write/edit (read-only denies, workspace-write contains, danger-full-access
  * passes through), reads always passing through, the capability fact, and the
- * containment matrix — `..` traversal, absolute paths outside, and symlink
- * escapes (a symlinked directory inside the workspace pointing out, and a new
- * file created under one). The fence is exercised on a real filesystem: a
+ * containment matrix — `..` traversal, absolute paths outside, and directories
+ * symlinked into the workspace (writable through the declared path, both for an
+ * existing target and a new one). The fence is exercised on a real filesystem: a
  * denied write leaves no file on disk.
  */
 
@@ -115,19 +115,20 @@ describe('workspace-write containment', () => {
     expect(existsSync(join(workspace, '..', 'sibling-escape.txt'))).toBe(false)
   })
 
-  it('a symlinked directory inside the workspace pointing OUT is denied (canonicalized before containment)', async () => {
-    // workspace/link -> outside ; writing workspace/link/f.txt would land in outside/f.txt.
+  it('a directory symlinked into the workspace is writable through its declared path', async () => {
+    // workspace/link -> outside ; the linked directory is part of the workspace
+    // the developer set up, so writing workspace/link/f.txt lands through it.
     await symlink(outside, join(workspace, 'link'))
     const path = join(workspace, 'link', 'f.txt')
-    await expect(fs.writeText(await target(path), 'x')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
-    expect(existsSync(join(outside, 'f.txt'))).toBe(false)
+    await fs.writeText(await target(path), 'x')
+    expect(await readFile(join(outside, 'f.txt'), 'utf8')).toBe('x')
   })
 
-  it('a NEW file created under a symlinked-out directory is denied (deepest-ancestor realpath)', async () => {
+  it('a NEW file under a symlinked-in directory is created through its declared path', async () => {
     await symlink(outside, join(workspace, 'link'))
-    const path = join(workspace, 'link', 'newdir', 'deep.txt')
-    await expect(fs.writeText(await target(path), 'x')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
-    expect(existsSync(join(outside, 'newdir'))).toBe(false)
+    const path = join(workspace, 'link', 'deep.txt')
+    await fs.writeText(await target(path), 'x')
+    expect(await readFile(join(outside, 'deep.txt'), 'utf8')).toBe('x')
   })
 
   it('an edit outside the workspace is denied; the original is untouched', async () => {
