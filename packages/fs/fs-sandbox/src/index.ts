@@ -18,11 +18,9 @@
  * is accepted for this threat model.
  *
  * Per-call policy: `read-only` denies every mutation; `workspace-write` allows
- * a mutation when the target canonicalizes under the policy's workspace
+ * a mutation only when the target canonicalizes under the policy's workspace
  * root or a platform temp area (the SAME writable-root set Seatbelt grants,
- * derived from the one `writableRoots` function so bash and fs cannot drift),
- * or when the path the caller asked for is lexically under one of those roots,
- * which keeps a symlinked directory inside the workspace writable;
+ * derived from the one `writableRoots` function so bash and fs cannot drift);
  * `danger-full-access` delegates unfenced. A denial throws the structured
  * `FS_SANDBOX_DENIED` — no text inference is needed (unlike bash's kernel
  * stderr), because an in-process fence knows exactly what it refused. The
@@ -40,7 +38,7 @@ import type { FsEditOutcome, FsEditRequest, FsTarget, FsVersion, FsWriteIntent, 
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import { isDeclaredPathUnder, isPathUnder } from './containment.ts'
+import { isPathUnder } from './containment.ts'
 
 /**
  * Plugin config: the local backend's knobs verbatim (`cwd` resolution default
@@ -120,9 +118,7 @@ export class SandboxedFileSystem extends LocalFileSystem {
    * check-here-write-there TOCTOU). `read-only` denies; `workspace-write`
    * re-canonicalizes NOW (`resolve` realpaths the deepest existing ancestor,
    * reflecting a concurrently swapped symlink), requires containment under a
-   * writable root by the canonical path OR by the declared path the caller
-   * asked for (so a directory symlinked into the workspace stays writable),
-   * and returns THAT fresh target; `danger-full-access` returns
+   * writable root, and returns THAT fresh target; `danger-full-access` returns
    * the caller's target unfenced. Throws the structured `FS_SANDBOX_DENIED` on
    * refusal — the tool layer maps it to the model-facing `[sandbox: …]` marker
    * and the escalation hint.
@@ -135,14 +131,12 @@ export class SandboxedFileSystem extends LocalFileSystem {
       throw new FsError(`cannot write "${target.displayPath}": file access denied under read-only mode`, 'FS_SANDBOX_DENIED')
     }
     // workspace-write: containment on the FRESH canonical path (catches a
-    // symlink ancestor swapped since the tool resolved this target) or on the
-    // declared path, which keeps a directory symlinked into the workspace
-    // writable. The mutation delegates with THIS fresh target — never the
-    // stale one.
+    // symlink ancestor swapped since the tool resolved this target), and the
+    // mutation delegates with THIS fresh target — never the stale one.
     const fresh = await this.resolve(target.displayPath)
     let contained = false
     for (const root of writableRoots(policy)) {
-      if ((await isPathUnder(fresh.targetKey, root)) || isDeclaredPathUnder(fresh.displayPath, root)) {
+      if (await isPathUnder(fresh.targetKey, root)) {
         contained = true
         break
       }

@@ -74,25 +74,3 @@ export async function isPathUnder(
     ancestor = parent
   }
 }
-
-/**
- * Determine whether a DECLARED (pre-canonicalization) target path is a writable
- * root or lies lexically beneath it. `resolveLocalTarget` builds `displayPath`
- * with `path.resolve`, so `.` and `..` segments are already collapsed and a
- * prefix test is exact for the path the caller actually asked for.
- *
- * This is the spelling the model and the user see. A directory deliberately
- * symlinked into the workspace — a linked workspace package, a shared asset
- * directory, `/tmp` on macOS — canonicalizes outside the root even though the
- * requested path is inside it, so {@link isPathUnder} alone refuses writes the
- * developer set that link up to make.
- *
- * @param path - the declared absolute target path (`FsTarget.displayPath`).
- * @param root - canonical writable root.
- * @param caseSensitive - whether lexical comparison preserves case; defaults
- *   to the host filesystem convention used by supported platforms.
- * @returns whether the declared path is the root or lexically under it.
- */
-export function isDeclaredPathUnder(path: string, root: string, caseSensitive = process.platform !== 'win32'): boolean {
-  return isLexicallyUnder(path, root, caseSensitive)
-}
