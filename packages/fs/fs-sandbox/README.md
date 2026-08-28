@@ -41,5 +41,6 @@ A standing-policy change appends an owner-rendered superseding runtime-context s
 ## Known Limitations and Deferred Work
 
 - **A policy fence, not a kernel boundary** — the check is trusted code over a model-controlled path, so the residual resolve-to-syscall TOCTOU is narrowed (by the in-place re-canonicalization) but not eliminated; adversarial host processes are out of scope. Kernel-grade isolation of untrusted code stays `ctx.shell`'s.
+- **A directory symlinked into the workspace is not writable** — containment is decided on the canonical path, so a link inside the workspace pointing elsewhere is refused even when the developer created it deliberately. Accepting the declared path instead would let any model-created symlink write anywhere; making such a directory writable requires granting its canonical target as a writable root, which is `writableRoots`' decision to own so the fs fence and the bash runner keep confining to the same set.
 - **Fence-vs-runner parity is derived from one owner** — the writable set comes from `writableRoots`, shared with the Seatbelt profile; a runner profile that defines its writable set elsewhere would drift.
 - **Requires `ctx.sandboxPolicy`** — tools use it to resolve each session policy and the backend uses it for agentless-call fallbacks; the backend does not confine without it composed.

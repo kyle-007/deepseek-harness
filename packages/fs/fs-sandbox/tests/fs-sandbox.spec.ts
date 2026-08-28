@@ -3,9 +3,10 @@
  * on write/edit (read-only denies, workspace-write contains, danger-full-access
  * passes through), reads always passing through, the capability fact, and the
  * containment matrix — `..` traversal, absolute paths outside, and symlink
- * escapes (a symlinked directory inside the workspace pointing out, and a new
- * file created under one). The fence is exercised on a real filesystem: a
- * denied write leaves no file on disk.
+ * escapes (a symlinked directory inside the workspace pointing out, a new file
+ * created under one, a multi-hop chain, a relative link, and an edit through a
+ * symlinked file). The fence is exercised on a real filesystem: a denied write
+ * leaves no file on disk and an existing outside target keeps its content.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -128,6 +129,33 @@ describe('workspace-write containment', () => {
     const path = join(workspace, 'link', 'newdir', 'deep.txt')
     await expect(fs.writeText(await target(path), 'x')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
     expect(existsSync(join(outside, 'newdir'))).toBe(false)
+  })
+
+  it('a CHAIN of symlinks inside the workspace ending outside is denied (every hop resolved)', async () => {
+    // workspace/a -> workspace/b -> outside: one hop short of the real target
+    // would still look contained, so the chain must resolve to its end.
+    await symlink(outside, join(workspace, 'b'))
+    await symlink(join(workspace, 'b'), join(workspace, 'a'))
+    const path = join(workspace, 'a', 'chained.txt')
+    await expect(fs.writeText(await target(path), 'x')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(existsSync(join(outside, 'chained.txt'))).toBe(false)
+  })
+
+  it('a RELATIVE symlink inside the workspace pointing outside is denied; the target is untouched', async () => {
+    const secret = join(outside, 'secret.txt')
+    await writeFile(secret, 'original')
+    await symlink(join('..', 'out', 'secret.txt'), join(workspace, 'sibling'))
+    await expect(fs.writeText(await target(join(workspace, 'sibling')), 'x')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(await readFile(secret, 'utf8')).toBe('original')
+  })
+
+  it('an EDIT through a symlinked-in file resolving outside is denied; the target is untouched', async () => {
+    const secret = join(outside, 'creds.txt')
+    await writeFile(secret, 'original')
+    await symlink(secret, join(workspace, 'creds.txt'))
+    await expect(fs.editText(await target(join(workspace, 'creds.txt')), { oldString: 'original', newString: 'owned', replaceAll: false }))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(await readFile(secret, 'utf8')).toBe('original')
   })
 
   it('an edit outside the workspace is denied; the original is untouched', async () => {
