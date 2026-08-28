@@ -86,10 +86,28 @@ export function parseCharset(contentType: string | null): string | undefined {
 }
 
 /**
+ * Encodings `TextDecoder` accepts whose decoding is not a stateless byte-to-text
+ * mapping. `iso-2022-jp` switches character sets through in-band escape
+ * sequences, so the same bytes decode to different text depending on what
+ * preceded them; `x-user-defined` is not a text decoding but a raw byte
+ * passthrough into a private-use range. Both let a server-declared charset
+ * change what the fetched bytes mean, so both are refused.
+ *
+ * Members are canonical `TextDecoder.encoding` values, which covers every WHATWG
+ * alias of a rejected encoding without enumerating aliases. The rest of this
+ * class — `hz-gb-2312`, `iso-2022-kr`, `iso-2022-cn`, `utf-7` — are not
+ * `TextDecoder` labels at all and already fail construction.
+ *
+ * A security invariant, not a deployment tunable.
+ */
+const STATEFUL_ENCODINGS = new Set(['iso-2022-jp', 'x-user-defined'])
+
+/**
  * Build a `TextDecoder` for the declared charset, falling back to UTF-8 when
  * none is declared. Throws {@link WebError} `WEB_UNSUPPORTED_CONTENT_TYPE` when
- * the label is present but not a charset `TextDecoder` recognizes — better to
- * fail loudly than return mojibake.
+ * the label is not a charset `TextDecoder` recognizes — better to fail loudly
+ * than return mojibake — and when it names a {@link STATEFUL_ENCODINGS}
+ * encoding, whose decoded text is not a fixed function of the response bytes.
  *
  * @param charset - the declared charset label (from {@link parseCharset}), or
  *   `undefined` to default to UTF-8.
@@ -97,9 +115,14 @@ export function parseCharset(contentType: string | null): string | undefined {
  */
 export function decoderForCharset(charset: string | undefined): TextDecoder {
   if (charset === undefined) return new TextDecoder('utf-8')
+  let decoder: TextDecoder
   try {
-    return new TextDecoder(charset)
+    decoder = new TextDecoder(charset)
   } catch (error: unknown) {
     throw new WebError(`unsupported charset "${charset}"`, 'WEB_UNSUPPORTED_CONTENT_TYPE', { cause: error })
   }
+  if (STATEFUL_ENCODINGS.has(decoder.encoding)) {
+    throw new WebError(`unsupported charset "${charset}" (${decoder.encoding} is not decoded statelessly)`, 'WEB_UNSUPPORTED_CONTENT_TYPE')
+  }
+  return decoder
 }

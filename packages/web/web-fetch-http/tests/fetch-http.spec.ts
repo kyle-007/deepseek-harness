@@ -76,6 +76,18 @@ describe('policy helpers', () => {
     expect(decoderForCharset('iso-8859-1').encoding).toBe('windows-1252')
     expect(() => decoderForCharset('not-a-charset')).toThrow(expect.objectContaining({ code: 'WEB_UNSUPPORTED_CONTENT_TYPE' }))
   })
+
+  it('rejects a charset whose decoding is not stateless', () => {
+    for (const label of ['iso-2022-jp', 'ISO-2022-JP', 'csiso2022jp', 'x-user-defined']) {
+      expect(() => decoderForCharset(label)).toThrow(expect.objectContaining({ code: 'WEB_UNSUPPORTED_CONTENT_TYPE' }))
+    }
+  })
+
+  it('keeps the stateless encodings real pages declare', () => {
+    for (const label of ['utf-8', 'utf-16le', 'shift_jis', 'euc-jp', 'gbk', 'gb18030', 'big5', 'euc-kr', 'koi8-r', 'windows-1251']) {
+      expect(decoderForCharset(label).encoding).toBe(label)
+    }
+  })
 })
 
 describe('HttpFetchProvider success', () => {

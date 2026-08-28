@@ -126,6 +126,69 @@ function findRawTextEnd(lowerHtml: string, name: string, from: number): number {
 }
 
 /**
+ * Remove {@link RAW_TEXT_ELEMENTS} and their contents from raw HTML.
+ * `turndown.remove` drops these on the converted path; this applies the same
+ * removal to the two fallbacks that never reach turndown, so a body that skips
+ * conversion is not less sanitized than one that completes it. Both fallbacks
+ * trigger on adversarial markup, which is where the removal matters most.
+ *
+ * Scanning mirrors {@link exceedsConversionDepth}: a quoted `>` does not end an
+ * open tag, and {@link findRawTextEnd} locates the end tag without interpreting
+ * markup-like body text. An unterminated element drops everything to the end of
+ * the input, because a `<script>` with no end tag has no content that is not
+ * script. A stray end tag matches no open tag and stays as text.
+ *
+ * @param html - raw HTML about to pass through unconverted.
+ * @returns the markup with those elements and their contents removed.
+ */
+function stripRawTextElements(html: string): string {
+  const lowerHtml = html.toLowerCase()
+  let out = ''
+  let kept = 0
+  let offset = 0
+
+  for (;;) {
+    const start = lowerHtml.indexOf('<', offset)
+    if (start === -1) break
+    let cursor = start + 1
+    const nameStart = cursor
+    while (/[a-z0-9-]/.test(lowerHtml[cursor] ?? '')) cursor += 1
+    const name = lowerHtml.slice(nameStart, cursor)
+    if (!RAW_TEXT_ELEMENTS.has(name) || !isTagBoundary(html[cursor])) {
+      offset = start + 1
+      continue
+    }
+
+    // Consume the rest of the open tag; a `>` inside a quoted attribute value
+    // does not end it.
+    let quote: '"' | "'" | undefined
+    while (cursor < html.length) {
+      const char = html[cursor]
+      cursor += 1
+      if (quote !== undefined) {
+        if (char === quote) quote = undefined
+      } else if (char === '"' || char === "'") {
+        quote = char
+      } else if (char === '>') {
+        break
+      }
+    }
+
+    out += html.slice(kept, start)
+    const end = findRawTextEnd(lowerHtml, name, cursor)
+    if (end === -1) {
+      kept = html.length
+      break
+    }
+    const close = html.indexOf('>', end)
+    kept = close === -1 ? html.length : close + 1
+    offset = kept
+  }
+
+  return out + html.slice(kept)
+}
+
+/**
  * Conservatively reject HTML whose lexical element stack crosses the conversion
  * depth ceiling. The single pass ignores closing tags inside comments, skips
  * raw-text bodies, respects quoted `>` characters, and only accepts a closing
@@ -205,7 +268,7 @@ function exceedsConversionDepth(html: string): boolean {
 }
 
 interface RenderedBody {
-  /** Converted text, or raw HTML when conversion is unsafe or fails. */
+  /** Converted text, or stripped raw HTML when conversion is unsafe or fails. */
   text: string
   /** Whether the source was cut before conversion to bound synchronous work. */
   sourceTruncated: boolean
@@ -219,21 +282,22 @@ interface RenderedBody {
  * @param maxInputChars - maximum source characters processed synchronously.
  * @returns the rendered prefix and whether the source was cut. HTML nested
  *   beyond {@link MAX_CONVERSION_DEPTH} or rejected by turndown passes through
- *   raw; a degraded page beats an error for a body the provider decoded.
+ *   unconverted after {@link stripRawTextElements}; a degraded page beats an
+ *   error for a body the provider decoded.
  */
 function renderBody(body: WebFetchBody, maxInputChars: number): RenderedBody {
   const content = body.content.slice(0, maxInputChars)
   const sourceTruncated = content.length !== body.content.length
   switch (body.kind) {
     case 'html':
-      if (exceedsConversionDepth(content)) return { text: content, sourceTruncated }
+      if (exceedsConversionDepth(content)) return { text: stripRawTextElements(content), sourceTruncated }
       try {
         return { text: turndown.turndown(content), sourceTruncated }
       } catch {
         // turndown's DOM walk recurses per element; malformed markup the lexical
         // guard cannot model can still throw RangeError. Provider errors stay
         // structured WebErrors upstream; conversion failure downgrades to raw HTML.
-        return { text: content, sourceTruncated }
+        return { text: stripRawTextElements(content), sourceTruncated }
       }
     case 'text':
       return { text: content, sourceTruncated }

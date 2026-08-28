@@ -49,3 +49,4 @@
 - **SSRF／私有网络防护暂缓**：不会阻止私有、loopback、link-local、multicast 或其他非公开目标，也不进行 DNS 解析后验证或逐跳重新验证（见 [web 能力 seam Agent Note](../../../.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.zh.md)）。在此功能落地前，该提供方是 SSRF 原语；能够访问敏感内部网络目标的部署**禁止启用它**。
 - **只解码文本内容**：包括 html/xhtml 与 `text/*` 加 JSON/XML 家族；缺少 `Content-Type` 或任何二进制类型都会抛出 `WEB_UNSUPPORTED_CONTENT_TYPE`，可提取文本的 PDF 解码属于明确的暂缓工作。
 - **charset 只来自 `Content-Type` 标头**（默认为 UTF-8）：HTML `<meta charset>` 声明会被忽略；声明但无法识别的 charset 标签会抛出异常，而非回退。
+- **只接受无状态解码的 charset**：`iso-2022-jp`（带内转义序列会切换字符集）与 `x-user-defined`（原始字节透传进私用区）会抛出 `WEB_UNSUPPORTED_CONTENT_TYPE`，因此服务器声明的 charset 无法改变响应字节的含义。`TextDecoder` 认得的其余标签仍可解码，包括 `shift_jis`、`euc-jp`、`gbk`、`gb18030`、`big5` 与 `euc-kr`。
