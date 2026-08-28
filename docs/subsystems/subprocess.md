@@ -36,6 +36,26 @@ interface CollectedOutput {
 }
 ```
 
+## Forwarded developer-CLI credentials
+
+`SENSITIVE_ENV_PATTERN` (`/KEY|PASSWORD|SECRET|TOKEN/i`) drops every credential-shaped ambient name from the child base, so the harness's own `DEEPSEEK_API_KEY` never reaches a spawned process implicitly. `FORWARDED_CREDENTIAL_ENV` is the closed exemption list: names that survive the scrub because the developer CLIs a tool call reaches for most often authenticate from the ambient environment and stop at an interactive login prompt once their token is gone, which reads to the model as a hung command.
+
+Every exempted name hands real reach to any process the model spawns, so the set carries a per-variable record here. Adding, renaming, or removing an entry is a change to a security boundary: it lands with its row on both language sides, a named review in the last column, and the [`verify-forwarded-credential-env` gate](../../scripts/verify-forwarded-credential-env.ts) green. That gate reads the set and the pattern out of the seam source, rejects any name the record omits (and any row the set no longer holds), rejects an empty use-case, risk, or review cell, and rejects an entry that is not upper-case or does not match `SENSITIVE_ENV_PATTERN` — such an entry is dead, because `scrubbedParentEnv` consults the set only for upper-cased names the pattern already matched, and a misspelling is the usual cause.
+
+<!-- forwarded-credential-env -->
+
+| Variable | Forwarded so that | Reach granted to any process the model spawns | Reviewed under |
+| --- | --- | --- | --- |
+| `GITHUB_TOKEN` | `gh`, `git` credential helpers, and Actions-shaped tooling authenticate GitHub API and push traffic instead of stopping at `gh auth login`. | Every API call and repository write the token's scopes allow, across other repositories and organization data — not only the checked-out repository. | [Exemption review][credential-review] |
+| `GH_TOKEN` | The `gh` CLI checks this name before `GITHUB_TOKEN`, so a session that sets only this one would still reach the login prompt. | Identical to `GITHUB_TOKEN`; the two names are interchangeable inputs to the same credential. | [Exemption review][credential-review] |
+| `NPM_TOKEN` | `npm` and `pnpm` substitute it into `.npmrc` to fetch private packages and to publish; without it installs fail outright rather than prompting. | Read and publish rights on every package the token's scopes cover, so a compromise reaches downstream consumers through a published version. | [Exemption review][credential-review] |
+| `AWS_ACCESS_KEY_ID` | One third of the ambient credential triple the AWS SDKs and CLI read; any missing part fails with `Unable to locate credentials`. | An identifier rather than a secret on its own; paired with the secret key it carries the principal's full IAM permissions. | [Exemption review][credential-review] |
+| `AWS_SECRET_ACCESS_KEY` | The signing secret of that triple, without which no AWS request can be signed. | The principal's full IAM permissions in every region and every account its roles can assume, typically without an expiry. | [Exemption review][credential-review] |
+| `AWS_SESSION_TOKEN` | The third element of temporary SSO or assumed-role credentials; omitting it makes the other two invalid rather than merely unauthenticated. | The assumed role's permissions until the session expires — the bounded lifetime is what makes this the preferred AWS shape. | [Exemption review][credential-review] |
+| `DOCKER_PASSWORD` | `docker login --password-stdin` wrappers and registry helpers read it, so a `docker push` does not stop at an interactive password prompt. | Pull and push on every repository the registry account can write, so a compromise can publish images downstream consumers run. | [Exemption review][credential-review] |
+
+[credential-review]: ../../.agents/notes/implemented/process/2026-08-28-forwarded-credential-env-change-control.md
+
 ## Node-shaped stdio dispositions
 
 Each stream's disposition is explicit, chosen per consumer: raw pipes for protocol framing (LSP JSON-RPC, ACP ndjson), inherit for pass-through diagnostics, and collect mode for bounded batch output — with the spill file optional, so a diagnostic tail (a language server's stderr) buffers without leaving files behind.

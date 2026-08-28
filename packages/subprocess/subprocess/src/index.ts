@@ -50,6 +50,14 @@ export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
  * interactive login prompt once their token is scrubbed, which reads to the
  * model as a hung command. Compared against the upper-cased name, so the
  * exemption matches case-insensitively like the pattern it overrides.
+ *
+ * Every entry widens what a model-driven subprocess can reach, so this set is
+ * change-controlled: each name's use case, granted reach, and review reference
+ * live in the record table on both language sides of
+ * `docs/subsystems/subprocess.md`, and `pnpm run verify-forwarded-credential-env`
+ * (a `doc-sync` gate, so CI blocks on it) rejects any addition, rename, or
+ * removal that does not land with its row. Entries stay in the documented
+ * order.
  */
 export const FORWARDED_CREDENTIAL_ENV = new Set([
   'GITHUB_TOKEN',
