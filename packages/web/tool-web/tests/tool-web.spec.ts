@@ -339,6 +339,64 @@ describe('fetch formatting', () => {
     }
   })
 
+  it('drops script, style, and noscript from html too deep to convert', () => {
+    // The depth preflight skips conversion, so turndown's `remove` list never
+    // runs; the fallback must not be the one path that forwards script bodies.
+    const nested = '<div>'.repeat(600)
+    const pathological = `${nested}<script>fetch('https://evil.test')</script><b>keep</b>`
+    const out = formatFetchOutput({
+      url: 'https://a.test', statusCode: 200, truncated: false,
+      body: { kind: 'html', content: pathological },
+    }, NO_CAP)
+    expect(out).toBe(`${HEADER}${nested}<b>keep</b>`)
+    expect(out).not.toContain('evil.test')
+  })
+
+  it('drops script, style, and noscript when turndown throws', () => {
+    const spy = vi.spyOn(TurndownService.prototype, 'turndown').mockImplementation(() => {
+      throw new RangeError('Maximum call stack size exceeded')
+    })
+    try {
+      const out = formatFetchOutput({
+        url: 'https://a.test', statusCode: 200, truncated: false,
+        body: { kind: 'html', content: '<style>b{}</style><p>x</p><noscript><i>n</i></noscript>' },
+      }, NO_CAP)
+      expect(out).toBe(`${HEADER}<p>x</p>`)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('cannot be tricked out of dropping a raw-text element', () => {
+    const cases: [string, string][] = [
+      // A quoted `>` does not end the open tag.
+      ['<script src="a>b">bad</script>keep', 'keep'],
+      // An unterminated element takes the rest of the input with it.
+      ['keep<script>bad', 'keep'],
+      // Markup-like body text does not end the element early.
+      ['<script>var a = "</scr" + "ipt>bad"</script>keep', 'keep'],
+      // A stray end tag matches no open tag and stays as text.
+      ['</script>keep', '</script>keep'],
+      // A name that merely starts with a raw-text name is a different element.
+      ['<scriptlet>keep</scriptlet>', '<scriptlet>keep</scriptlet>'],
+      // Attributes on the end tag still close it.
+      ['<style>bad</style >keep', 'keep'],
+    ]
+    const spy = vi.spyOn(TurndownService.prototype, 'turndown').mockImplementation(() => {
+      throw new RangeError('Maximum call stack size exceeded')
+    })
+    try {
+      for (const [content, expected] of cases) {
+        expect(formatFetchOutput({
+          url: 'https://a.test', statusCode: 200, truncated: false,
+          body: { kind: 'html', content },
+        }, NO_CAP)).toBe(`${HEADER}${expected}`)
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('bounds source conversion work before rendering a custom provider body', () => {
     const spy = vi.spyOn(TurndownService.prototype, 'turndown').mockReturnValue('converted')
     try {
