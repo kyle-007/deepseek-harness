@@ -36,6 +36,26 @@ interface CollectedOutput {
 }
 ```
 
+## 转发的开发者 CLI 凭据
+
+`SENSITIVE_ENV_PATTERN`（`/KEY|PASSWORD|SECRET|TOKEN/i`）会从子进程基础环境中丢弃每一个形似凭据的环境名称，因此 harness 自身的 `DEEPSEEK_API_KEY` 绝不会隐式到达被 spawn 的进程。`FORWARDED_CREDENTIAL_ENV` 是那份封闭的豁免清单：这些名称能在清除后存活，是因为工具调用最常用到的开发者 CLI 都从环境中读取凭据完成认证，一旦令牌被清除就会停在交互式登录提示上，而这在模型看来就是一条挂起的命令。
+
+每一个被豁免的名称都会把真实的访问权限交给模型 spawn 的任意进程，因此该集合在此处附带逐变量的记录。新增、重命名或移除一个条目就是在改动安全边界：它必须与两个语言侧的表格行、最后一列中具名的评审记录，以及通过的 [`verify-forwarded-credential-env` gate](../../scripts/verify-forwarded-credential-env.ts) 一同落地。该 gate 从 seam 源码中读取集合与正则，拒绝记录中缺失的名称（以及集合中已不存在的表格行），拒绝空的用途、风险或评审单元格，并拒绝非全大写或不匹配 `SENSITIVE_ENV_PATTERN` 的条目——这类条目是死条目，因为 `scrubbedParentEnv` 只会针对已被该正则匹配、且转为大写后的名称查询该集合，而拼写错误正是常见原因。
+
+<!-- forwarded-credential-env -->
+
+| 变量 | 转发的用途 | 授予模型所 spawn 进程的访问范围 | 评审依据 |
+| --- | --- | --- | --- |
+| `GITHUB_TOKEN` | 让 `gh`、`git` 凭据助手与 Actions 风格的工具完成 GitHub API 与推送流量的认证，而不是停在 `gh auth login`。 | 该令牌作用域允许的全部 API 调用与仓库写入，涵盖其他仓库与组织数据，而不仅是当前检出的仓库。 | [豁免评审][credential-review] |
+| `GH_TOKEN` | `gh` CLI 会先于 `GITHUB_TOKEN` 检查这个名称，因此只设置了它的会话仍会撞上登录提示。 | 与 `GITHUB_TOKEN` 相同；这两个名称是同一份凭据可互换的输入。 | [豁免评审][credential-review] |
+| `NPM_TOKEN` | `npm` 与 `pnpm` 会把它代入 `.npmrc` 以拉取私有包并发布；缺少它时安装会直接失败而非发出提示。 | 该令牌作用域覆盖的每个包的读取与发布权限，因此一次泄露可经由已发布的版本波及下游消费方。 | [豁免评审][credential-review] |
+| `AWS_ACCESS_KEY_ID` | AWS SDK 与 CLI 读取的环境凭据三元组之一；缺少任一部分都会以 `Unable to locate credentials` 失败。 | 单独看它是标识符而非机密；与密钥配对后即承载该主体的完整 IAM 权限。 | [豁免评审][credential-review] |
+| `AWS_SECRET_ACCESS_KEY` | 该三元组中的签名机密，缺少它就无法对任何 AWS 请求签名。 | 该主体在每个区域、以及其角色可假定的每个账户中的完整 IAM 权限，且通常没有过期时间。 | [豁免评审][credential-review] |
+| `AWS_SESSION_TOKEN` | 临时 SSO 或假定角色凭据的第三个元素；省略它会让另外两个变为无效，而不只是未认证。 | 在会话过期之前所假定角色的权限——正是这一有界生命周期使它成为更可取的 AWS 形态。 | [豁免评审][credential-review] |
+| `DOCKER_PASSWORD` | `docker login --password-stdin` 封装与镜像仓库助手会读取它，使 `docker push` 不会停在交互式密码提示上。 | 该镜像仓库账户可写的每个仓库的拉取与推送权限，因此一次泄露即可发布下游消费方会运行的镜像。 | [豁免评审][credential-review] |
+
+[credential-review]: ../../.agents/notes/implemented/process/2026-08-28-forwarded-credential-env-change-control.zh.md
+
 ## Node 风格的 stdio 处置方式（disposition）
 
 每条流的处置方式都显式给出，由各消费方自行选择：原始管道用于协议分帧（LSP JSON-RPC、ACP ndjson），inherit 用于直通的诊断输出，收集模式用于有界的批量输出；其中 spill 文件是可选的，因此诊断尾部（语言服务器的 stderr）可以只在内存中缓冲，不留下任何文件。

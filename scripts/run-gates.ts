@@ -682,6 +682,7 @@ function docSyncLeafGates(options: {
       label: 'documentation site checks',
     }),
     pnpmScript('package-readme-limitations', 'verify-package-readme-limitations', { label: 'package README limitations' }),
+    pnpmScript('forwarded-credential-env', 'verify-forwarded-credential-env', { label: 'forwarded credential env' }),
   ]
 }
 
